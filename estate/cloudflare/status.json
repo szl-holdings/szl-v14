@@ -1,0 +1,23 @@
+{
+  "check": "GET /user/tokens/verify equivalent via connector list-account-identifier-options",
+  "captured_at": "2026-08-31T05:20:32.636192+00:00",
+  "status": "BLOCKED",
+  "error": {
+    "http": 400,
+    "code": 6003,
+    "message": "Invalid request headers",
+    "chain": [
+      {
+        "code": 6103,
+        "message": "Invalid format for X-Auth-Key header"
+      }
+    ]
+  },
+  "diagnosis": "Connector API key malformed (X-Auth-Key invalid). Matches Phase -1 diagnosis: regenerate token.",
+  "needed_scopes": [
+    "Zone:DNS:Edit",
+    "Zone:Zone:Read"
+  ],
+  "verify_url": "https://api.cloudflare.com/client/v4/user/tokens/verify",
+  "expected": "{\"status\":\"active\"}"
+}

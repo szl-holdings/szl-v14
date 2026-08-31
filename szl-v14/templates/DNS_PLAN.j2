@@ -1,0 +1,20 @@
+# DNS plan: {{ zone }}
+
+role: {{ role }}
+
+## Prechecks
+{% for p in prechecks -%}
+- {{ p }}
+{% endfor %}
+
+## Records
+| type | name | content | proxied | ttl |
+|---|---|---|---|---|
+{% for r in records -%}
+| {{ r.type }} | {{ r.name }} | {{ r.content }} | {{ r.proxied | default(false) }} | {{ r.ttl | default(300) }} |
+{% endfor %}
+
+## Rollback
+source: {{ rollback_source }}
+Rule: export the zone to the rollback source BEFORE any write; one record set at
+a time; poll propagation between sets.

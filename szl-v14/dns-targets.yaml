@@ -1,0 +1,40 @@
+# Canonical DNS plan for the SZL estate. The command center is a-11-oy.com;
+# the public proof origin is a11oy.net. The forbidden domain appears nowhere.
+zones:
+  - zone: a11oy.net
+    role: public proof origin
+    apex_cname_flattening: false
+    rollback_source: artifacts/dns/a11oy.net.rollback.json
+    target_summary: GitHub Pages (4 apex A + www CNAME)
+    notes: proxied=false while GitHub provisions the certificate; if proxying is ever wanted, set Full (strict) BEFORE enabling it
+    prechecks:
+      - zone exported to rollback source before any write
+      - token verified active at /user/tokens/verify
+    records:
+      - {type: A, name: "@", content: "185.199.108.153", provider: github_pages, proxied: false, ttl: 300}
+      - {type: A, name: "@", content: "185.199.109.153", provider: github_pages, proxied: false, ttl: 300}
+      - {type: A, name: "@", content: "185.199.110.153", provider: github_pages, proxied: false, ttl: 300}
+      - {type: A, name: "@", content: "185.199.111.153", provider: github_pages, proxied: false, ttl: 300}
+      - {type: CNAME, name: "www", content: "szl-holdings.github.io.", provider: github_pages, proxied: false, ttl: 300}
+  - zone: a-11-oy.com
+    role: command center
+    apex_cname_flattening: true
+    rollback_source: artifacts/dns/a-11-oy.com.rollback.json
+    target_summary: Hugging Face Spaces custom domain (hf.space)
+    notes: Spaces custom domains require PRO/Team/Enterprise; SZLHOLDINGS org is Team plan (verified) — precheck PASS. Cloudflare flattens apex CNAME natively.
+    prechecks:
+      - HF plan tier verified PRO/Team/Enterprise before any DNS work
+      - no coexisting A/AAAA/CNAME at the label
+    records:
+      - {type: CNAME, name: "@", content: "hf.space.", provider: hf_spaces, proxied: false, ttl: 300}
+  - zone: szl.dev
+    role: developer surface
+    apex_cname_flattening: false
+    rollback_source: artifacts/dns/szl.dev.rollback.json
+    target_summary: triage only — registrar/delegation first
+    notes: .dev is HSTS-preloaded; order DNS -> cert -> curl-verify -> announce; run whois -> dig +trace NS -> SOA before any record work
+    prechecks:
+      - whois szl.dev
+      - dig +trace NS szl.dev
+      - dig SOA szl.dev
+    records: []

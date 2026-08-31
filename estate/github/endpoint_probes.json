@@ -1,0 +1,50 @@
+{
+  "captured_at": "2026-08-31T13:15:03.718212+00:00",
+  "probes": [
+    {
+      "url": "https://a11oy.net/health.json",
+      "http": 200,
+      "server": "GitHub.com",
+      "cf": false
+    },
+    {
+      "url": "https://a-11-oy.com/api/a11oy/v1/honest",
+      "http": 200,
+      "server": "cloudflare",
+      "cf": true
+    },
+    {
+      "url": "https://a11oy.net/",
+      "http": 200,
+      "server": "GitHub.com",
+      "cf": false
+    },
+    {
+      "url": "https://a-11-oy.com/",
+      "http": 200,
+      "server": "cloudflare",
+      "cf": true
+    },
+    {
+      "url": "https://szl.dev/",
+      "http": null,
+      "error": "URLError: <urlopen error [Errno -2] Name or service not known>"
+    },
+    {
+      "tls": [
+        {
+          "host": "a11oy.net",
+          "issuer": "Let's Encrypt",
+          "notAfter": "Oct 14 23:32:02 2026 GMT",
+          "san_ok": true
+        },
+        {
+          "host": "a-11-oy.com",
+          "issuer": "Google Trust Services",
+          "notAfter": "Nov 23 19:18:12 2026 GMT",
+          "san_ok": true
+        }
+      ]
+    }
+  ]
+}

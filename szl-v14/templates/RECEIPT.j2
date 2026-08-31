@@ -1,0 +1,10 @@
+# Receipt: {{ cmd }}
+
+- state: {{ state }}
+- timestamp_utc: {{ timestamp_utc }}
+- args_digest: {{ args_digest }}
+- inputs: {{ inputs | length }} file(s)
+- outputs: {{ outputs | length }} file(s)
+{% for path, digest in outputs.items() -%}
+- {{ path }} — sha256:{{ digest }}
+{% endfor %}

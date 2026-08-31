@@ -1,0 +1,31 @@
+# Published claims, re-measured against live snapshots. Mismatch -> CLAIM_DRIFT.
+- id: gh-repo-count
+  claim: GitHub org repository count
+  source: estate enumeration 2026-08-31 (3-source agreement)
+  expected: 100
+  measure: {kind: github_repo_count}
+- id: gh-public-count
+  claim: GitHub org public repository count
+  source: estate enumeration 2026-08-31
+  expected: 95
+  measure: {kind: github_visibility_count, visibility: PUBLIC}
+- id: hf-model-count
+  claim: Hugging Face model count
+  source: hub_repo_search author=SZLHOLDINGS 2026-08-31
+  expected: 44
+  measure: {kind: hf_repo_count, repo_type: model}
+- id: hf-dataset-count
+  claim: Hugging Face dataset count
+  source: hub_repo_search author=SZLHOLDINGS 2026-08-31
+  expected: 38
+  measure: {kind: hf_repo_count, repo_type: dataset}
+- id: hf-space-count
+  claim: Hugging Face space count
+  source: hub_repo_search author=SZLHOLDINGS 2026-08-31
+  expected: 47
+  measure: {kind: hf_repo_count, repo_type: space}
+- id: khipu-sda-core-exists
+  claim: khipu-sda-core exists (the KHIPU line is not greenfield)
+  source: estate enumeration 2026-08-31
+  expected: true
+  measure: {kind: github_repo_present, repo: khipu-sda-core}

@@ -1,0 +1,10 @@
+# One regex per line. Any match in any section = compile FAIL (exit 1).
+# These encode the recurring defects as mechanically undetectable-to-miss.
+sha256\(\s*["'][A-Za-z0-9_/-]+["']\s*\.encode\(\)\s*\)
+"sig"\s*:\s*""
+keyid"\s*:\s*"PENDING-SIGSTORE
+specVersion"\s*:\s*"1\.6"
+api/collections\?author=
+proxied"?\s*[:=]\s*true[^\n]{0,80}185\.199\.|185\.199\.[^\n]{0,80}proxied"?\s*[:=]\s*true
+print\([^)]*(TOKEN|SECRET|API_KEY|PAT)\b
+json\.dumps\([^)]*sort_keys\s*=\s*True

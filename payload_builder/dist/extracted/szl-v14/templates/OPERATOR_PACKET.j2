@@ -1,0 +1,30 @@
+# OPERATOR PACKET
+
+Everything else in the export tree is supporting evidence for this page.
+Every one of the fifteen answers below is mandatory; an omission is a FAIL.
+
+1. Verified (digests): {{ verified | default('UNKNOWN') }}
+2. Fixed (post-fix verification): {{ fixed | default('UNKNOWN') }}
+3. Remaining failures (finding codes): {{ failing | default('UNKNOWN') }}
+4. Blocked on credentials (exact scope): {{ blocked_credentials | default('UNKNOWN') }}
+5. Exact DNS record diff proposed: {{ dns_diff | default('UNKNOWN') }}
+6. Exact rollback records: {{ rollback | default('UNKNOWN') }}
+7. Exact next safe command: {{ next_command | default('UNKNOWN') }}
+8. Per-domain DNS state: {{ dns_state | default('UNKNOWN') }}
+9. Per-domain TLS state: {{ tls_state | default('UNKNOWN') }}
+10. Per-domain app state: {{ app_state | default('UNKNOWN') }}
+11. Forbidden-domain references remaining (must be 0): {{ forbidden_refs | default('UNKNOWN') }}
+12. V11 artifacts (verified / regressed / unknown, with SHAs): {{ v11 | default('UNKNOWN') }}
+13. Estate completeness: {{ estate_completeness | default('UNKNOWN') }}
+14. Claims: pass {{ claims_pass | default('?') }}, CLAIM_DRIFT {{ claims_drift | default('?') }}, UNMEASURABLE {{ claims_unmeasurable | default('?') }}
+15. publication_eligible: {{ publication_eligible | default('False') }} — false inputs: {{ eligibility_blockers | default('UNKNOWN') }}
+
+## Per-phase block
+
+```
+STATUS:           <PASS|WARN|FAIL|BLOCKED|UNKNOWN>
+EVIDENCE:         <paths + digests>
+ROLLBACK:         <file + records, or "n/a — read-only phase">
+NEXT SAFE ACTION: <one command>
+RECEIPT:          <path>
+```

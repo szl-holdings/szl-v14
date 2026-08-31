@@ -1,0 +1,88 @@
+# SZL_MASTER_PAYLOAD_V14 — build manifest
+# Sections are the source. dist/ is derived. Never hand-edit dist/.
+
+[payload]
+name = "SZL_MASTER_PAYLOAD_V14"
+version = "14.0.0"
+out = "dist/SZL_MASTER_PAYLOAD_V14.md"
+# A timestamp in the body makes every rebuild produce a different digest and
+# renders "reproducible" unfalsifiable. Build time lives ONLY in the receipt.
+embed_build_time_in_body = false
+
+[gates]
+# phase_neg1_dns must precede any training/chip section. Enforced at compile.
+require_dns_first = true
+dns_first_before = ["khipu", "train"]
+forbidden_scan = true
+banned_claims = true
+# Computed at export time from 14 AND-ed inputs by the control plane.
+# The builder never asserts eligibility itself.
+publication_eligible = false
+
+[compile_fail_conditions]
+# Promoted from review findings to build-breaking gates (council round 9-10):
+name_hashing = true        # digest of a name/string instead of file bytes
+secret_logging = true      # printing TOKEN/SECRET/API_KEY/PAT values
+empty_sig_as_signed = true # "sig":"" or empty signatures labeled signed
+sort_keys_jcs = true       # json.dumps(sort_keys=True) passed off as RFC 8785
+
+[[sections]]
+path = "sections/00_read_first.md"
+id = "read_first"
+
+[[sections]]
+path = "sections/05_canonical_domains.md"
+id = "canonical_domains"
+
+[[sections]]
+path = "sections/10_phase_neg1_dns.md"
+id = "phase_neg1_dns"
+must_contain = ["/user/tokens/verify", "Zone:DNS:Edit", "185.199.108.153", "hf.space", "HSTS", "rollback", "1033"]
+
+[[sections]]
+path = "sections/15_install_manifest.md"
+id = "install_manifest"
+
+[[sections]]
+path = "sections/20_doctor.md"
+id = "doctor"
+
+[[sections]]
+path = "sections/25_correctness_defects.md"
+id = "correctness_defects"
+
+[[sections]]
+path = "sections/30_estate_audit.md"
+id = "estate_audit"
+
+[[sections]]
+path = "sections/35_v11_verification.md"
+id = "v11_verification"
+
+[[sections]]
+path = "sections/40_mcp_attestation.md"
+id = "mcp_attestation"
+
+[[sections]]
+path = "sections/45_remediate_export.md"
+id = "remediate_export"
+
+[[sections]]
+path = "sections/50_khipu.md"
+id = "khipu"
+
+[[sections]]
+path = "sections/55_operator_packet.md"
+id = "operator_packet"
+
+[[sections]]
+path = "sections/60_two_pass_run.md"
+id = "two_pass_run"
+
+[[sections]]
+path = "sections/70_phase_b_builder.md"
+id = "phase_b_builder"
+
+[[sections]]
+path = "sections/90_control_plane.md"
+id = "control_plane"

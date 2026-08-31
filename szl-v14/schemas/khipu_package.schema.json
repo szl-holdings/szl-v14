@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://szl.dev/schemas/khipu_package.schema.json",
+  "title": "KHIPU .khipu package manifest — inherits the four correctness fixes at birth",
+  "type": "object",
+  "required": ["format", "graph", "weights", "abi", "quantization", "digests", "signatures"],
+  "properties": {
+    "format": {"const": "khipu-package/1"},
+    "graph": {"type": "string"},
+    "weights": {"type": "array", "items": {"type": "string"}},
+    "abi": {"type": "string"},
+    "quantization": {"type": "object"},
+    "digests": {
+      "type": "object",
+      "description": "sha256 over the ACTUAL BYTES of each weight file and the JCS-canonical manifest; never over names",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "signatures": {
+      "type": "array",
+      "description": "[] while unsigned; the file is then named *.unsigned.json"
+    }
+  },
+  "additionalProperties": true
+}

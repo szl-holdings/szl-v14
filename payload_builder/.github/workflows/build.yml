@@ -1,0 +1,26 @@
+name: payload-builder
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-verify-idempotent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install builder deps
+        run: pip install rfc8785
+      - name: Build payload
+        run: python build.py all
+      - name: Verify payload
+        run: python build.py verify
+      - name: Prove byte-identical rebuild
+        run: make idempotent
+      - name: Install and test extracted control plane
+        run: |
+          pip install -e dist/extracted/szl-v14
+          cd dist/extracted/szl-v14 && python -m pytest -q

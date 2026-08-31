@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://szl.dev/schemas/dns_plan.schema.json",
+  "title": "SZL v14 DNS targets",
+  "type": "object",
+  "required": ["zones"],
+  "properties": {
+    "zones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["zone", "records"],
+        "properties": {
+          "zone": {"type": "string"},
+          "role": {"type": "string"},
+          "apex_cname_flattening": {"type": "boolean"},
+          "rollback_source": {"type": "string"},
+          "prechecks": {"type": "array", "items": {"type": "string"}},
+          "target_summary": {"type": "string"},
+          "notes": {"type": "string"},
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "name", "content"],
+              "properties": {
+                "type": {"enum": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "CAA"]},
+                "name": {"type": "string"},
+                "content": {"type": "string"},
+                "provider": {"type": "string"},
+                "proxied": {"type": "boolean"},
+                "ttl": {"type": "integer", "minimum": 30}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# {{ title }}
+
+| order | severity | code | action | verify |
+|---|---|---|---|---|
+{% for i in items -%}
+| {{ i.order }} | {{ i.severity }} | {{ i.code }} | {{ i.action }} | {{ i.verify }} |
+{% endfor %}

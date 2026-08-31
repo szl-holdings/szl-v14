@@ -1,0 +1,7 @@
+# One case-insensitive regex per line. Any match in any section = compile FAIL.
+# Language gating: the doctrine you cannot violate, not the doctrine you remember.
+first governance kernel
+state of the art
+production-ready
+world[- ]first
+\bSOTA\b

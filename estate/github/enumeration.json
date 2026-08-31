@@ -1,0 +1,11 @@
+{
+  "org": "szl-holdings",
+  "captured_at": "2026-08-31T05:20:32.636192+00:00",
+  "sources": {
+    "gh_repo_list_limit200": 100,
+    "search_api_total_count": 100,
+    "rest_orgs_repos_paginate": 100
+  },
+  "agreement": "3-source agreement: cli=100 rest=100 search=100; cli==rest: True",
+  "estate_completeness": "VERIFIED (3 independent sources agree at 100)"
+}
