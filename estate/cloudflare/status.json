@@ -1,23 +1,53 @@
 {
-  "check": "GET /user/tokens/verify equivalent via connector list-account-identifier-options",
-  "captured_at": "2026-08-31T05:20:32.636192+00:00",
-  "status": "BLOCKED",
-  "error": {
-    "http": 400,
-    "code": 6003,
-    "message": "Invalid request headers",
-    "chain": [
-      {
-        "code": 6103,
-        "message": "Invalid format for X-Auth-Key header"
-      }
-    ]
+  "check": "Full zone DNS audit via vaulted custom-cred:api.cloudflare.com (token 'fresh — Sep 1', verified active via GET /user/tokens/verify)",
+  "captured_at": "2026-09-01T21:20:00+00:00",
+  "status": "RESOLVED_ACCESS_AUDIT_DONE",
+  "prior_state": "2026-08-31: BLOCKED — connector API key malformed (X-Auth-Key 6103). The working path is the custom-credential vault, not the pipedream connector (still broken; retire or re-auth it).",
+  "token_scopes_observed": {
+    "works": ["Zone:Zone:Read", "Zone:DNS:Read/Edit"],
+    "blocked_9109": ["Zone settings read (ssl, security_level)", "Rulesets/Transform Rules write (10000 auth error)"]
   },
-  "diagnosis": "Connector API key malformed (X-Auth-Key invalid). Matches Phase -1 diagnosis: regenerate token.",
-  "needed_scopes": [
-    "Zone:DNS:Edit",
-    "Zone:Zone:Read"
+  "zones": {
+    "a-11-oy.com": "27911fb3d5ed874fdd4e844ed7f5e248",
+    "a11oy.net": "6893093cd089c9994349bc16b0906006"
+  },
+  "findings": [
+    {
+      "id": "INC-05",
+      "host": "www.a-11-oy.com",
+      "state": "ROOT-CAUSE CONFIRMED, FIX BLOCKED ON TOKEN SCOPE",
+      "detail": "CNAME -> szlholdings-a11oy.hf.space is correct at DNS; HF edge routes by Host header and only the apex is registered as the Space custom domain, so www 404s. Fix is a Cloudflare dynamic-redirect rule (301 www -> apex, path+query preserved) in phase http_request_dynamic_redirect — needs Zone:Config Rules/Transform Edit on the token. Alternative: register www.a-11-oy.com as an additional custom domain on the Space if HF multi-domain is available."
+    },
+    {
+      "id": "CF-HEADER-RULE",
+      "host": "a11oy.net",
+      "state": "BLOCKED ON TOKEN SCOPE",
+      "detail": "Apex A records + www CNAME are now proxied (orange) so Cloudflare can inject headers, but no security-header Transform Rule exists: live response carries no HSTS/CSP/X-Content-Type-Options/Referrer-Policy. a-11-oy.com serves the full suite from the app itself (server: szl). Add Modify Response Header rule (HSTS max-age=31536000; includeSubDomains, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, CSP frame-ancestors) once Transform Rules scope exists. Note: GitHub Pages ignores the repo _headers file."
+    },
+    {
+      "id": "KILLINCHU-SUBDOMAIN",
+      "host": "killinchu.a-11-oy.com",
+      "state": "OPEN — NEEDS OWNER DECISION",
+      "detail": "Proxied CNAME -> szlholdings-killinchu.hf.space but HF edge returns 404 (host not registered as the Space's custom domain). Either register the custom domain on the killinchu Space or remove the record."
+    },
+    {
+      "id": "DEV-SUBDOMAIN",
+      "host": "dev.a-11-oy.com",
+      "state": "OPEN — NEEDS OWNER DECISION",
+      "detail": "DNS-only CNAME -> szl-holdings.github.io returns GitHub 404: no Pages site claims dev.a-11-oy.com (szl-holdings.github.io claims holdings.a-11-oy.com). Wire a Pages site or remove the record."
+    }
   ],
-  "verify_url": "https://api.cloudflare.com/client/v4/user/tokens/verify",
-  "expected": "{\"status\":\"active\"}"
+  "verified_healthy": {
+    "a11oy.net": "200; www.a11oy.net 301 -> apex",
+    "holdings.a-11-oy.com": "200",
+    "ntfy.a11oy.net": "200 (AAAA 100:: discard + proxy pattern, intentional)",
+    "mail_hygiene": "both apexes SPF 'v=spf1 -all' + DMARC p=reject (no-mail posture, intentional)",
+    "tunnels": "gateway/gdw/gpu/gpu2/meter/meter2 -> cfargotunnel.com CNAMEs (szl-mesh), proxied",
+    "gpu-cloud": "A 137.175.76.24 DNS-only ttl=300"
+  },
+  "notes": [
+    "a11oy.net apex is proxied over GitHub Pages and works; do not flip proxy state without re-verifying the Pages custom-domain check.",
+    "a-11-oy.com apex CNAME -> hf.space resolves through Cloudflare flattening and serves 200 when the Space is RUNNING; intermittent apex timeouts observed 21:10-21:20Z were Space RUNNING_APP_STARTING (cold start), not DNS.",
+    "szlholdings.com (Google Workspace) is NOT on Cloudflare and still lacks a DMARC record — add p=none monitor-mode TXT at its registrar (see szlholdings_dmarc_fix.md from the parallel session)."
+  ]
 }
