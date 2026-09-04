@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           local_sha="$(git -C a11oy rev-parse HEAD)"
           test "$local_sha" = "$A11OY_CONTROLLER_SHA"
-          git ls-remote https://github.com/szl-holdings/a11oy.git | grep -Fq "$A11OY_CONTROLLER_SHA"
+          git -C a11oy cat-file -e "${A11OY_CONTROLLER_SHA}^{commit}"
           test -f a11oy/scripts/repair_cloudflare_product_edge.py
           test -f a11oy/cloudflare/a11oy-product-root-worker.mjs
           printf 'A11oy protected controller source: %s\n' "$local_sha"
