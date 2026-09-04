@@ -1,0 +1,443 @@
+name: Stalled build and Hugging Face estate audit
+
+on:
+  push:
+    branches:
+      - audit/stalled-builds-20260904
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: stalled-build-estate-audit-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Read-only organization and Hub truth capture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Check out exact audit source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: audit/stalled-builds-20260904
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Capture current GitHub and Hugging Face truth
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python - <<'PY'
+          from __future__ import annotations
+
+          import concurrent.futures
+          import datetime as dt
+          import hashlib
+          import json
+          import os
+          import re
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+          from typing import Any
+
+          ORG = "szl-holdings"
+          HF_ORG = "SZLHOLDINGS"
+          TOKEN = os.environ.get("GH_TOKEN", "").strip()
+          NOW = dt.datetime.now(dt.timezone.utc)
+          CANDIDATE = re.compile(r"(?:^|/)(?:codex|perplexity|repair|finish|stalled|frontier)", re.I)
+          RED = {"failure", "timed_out", "action_required", "startup_failure"}
+          ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
+          TRANSIENT = {"cancelled", "stale"}
+          USER_AGENT = "SZL-Stalled-Build-Audit/1.0"
+
+          def iso(value: str | None) -> dt.datetime | None:
+              if not value:
+                  return None
+              try:
+                  return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(dt.timezone.utc)
+              except ValueError:
+                  return None
+
+          def request_json(url: str, *, github: bool = False, timeout: int = 30) -> Any:
+              headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
+              if github:
+                  headers.update({
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  })
+                  if TOKEN:
+                      headers["Authorization"] = f"Bearer {TOKEN}"
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request, timeout=timeout) as response:
+                  body = response.read(8_000_000)
+                  return json.loads(body.decode("utf-8")) if body else None
+
+          def github(path: str) -> Any:
+              return request_json("https://api.github.com" + path, github=True)
+
+          def safe_github(path: str) -> tuple[Any, str | None]:
+              try:
+                  return github(path), None
+              except urllib.error.HTTPError as exc:
+                  return None, f"HTTP_{exc.code}"
+              except Exception as exc:
+                  return None, type(exc).__name__
+
+          repos: list[dict[str, Any]] = []
+          for page in range(1, 11):
+              rows, error = safe_github(
+                  f"/orgs/{ORG}/repos?type=all&sort=full_name&direction=asc&per_page=100&page={page}"
+              )
+              if error:
+                  raise SystemExit(f"repository inventory failed: {error}")
+              if not isinstance(rows, list):
+                  raise SystemExit("repository inventory returned a non-list")
+              repos.extend(row for row in rows if isinstance(row, dict))
+              if len(rows) < 100:
+                  break
+
+          repo_reports: list[dict[str, Any]] = []
+          orphan_branches: list[dict[str, Any]] = []
+          open_prs: list[dict[str, Any]] = []
+          latest_red: list[dict[str, Any]] = []
+          stalled_active: list[dict[str, Any]] = []
+          transient_latest: list[dict[str, Any]] = []
+
+          for repository in repos:
+              full_name = str(repository.get("full_name") or "")
+              name = str(repository.get("name") or "")
+              default = str(repository.get("default_branch") or "main")
+              row: dict[str, Any] = {
+                  "full_name": full_name,
+                  "private": bool(repository.get("private")),
+                  "archived": bool(repository.get("archived")),
+                  "disabled": bool(repository.get("disabled")),
+                  "default_branch": default,
+                  "pushed_at": repository.get("pushed_at"),
+                  "open_prs": [],
+                  "latest_workflows": [],
+                  "candidate_branches": [],
+                  "errors": [],
+              }
+
+              pulls, pull_error = safe_github(
+                  f"/repos/{full_name}/pulls?state=open&per_page=100"
+              )
+              if pull_error:
+                  row["errors"].append(f"pulls:{pull_error}")
+                  pulls = []
+              open_heads: set[str] = set()
+              for pull in pulls or []:
+                  if not isinstance(pull, dict):
+                      continue
+                  head = pull.get("head") or {}
+                  item = {
+                      "repository": full_name,
+                      "number": pull.get("number"),
+                      "title": pull.get("title"),
+                      "draft": pull.get("draft"),
+                      "head": head.get("ref"),
+                      "head_sha": head.get("sha"),
+                      "base": (pull.get("base") or {}).get("ref"),
+                      "created_at": pull.get("created_at"),
+                      "updated_at": pull.get("updated_at"),
+                      "html_url": pull.get("html_url"),
+                  }
+                  row["open_prs"].append(item)
+                  open_prs.append(item)
+                  if item["head"]:
+                      open_heads.add(str(item["head"]))
+
+              runs_payload, runs_error = safe_github(
+                  f"/repos/{full_name}/actions/runs?branch={urllib.parse.quote(default, safe='')}&per_page=100"
+              )
+              if runs_error:
+                  row["errors"].append(f"runs:{runs_error}")
+                  runs_payload = {}
+              latest: dict[str, dict[str, Any]] = {}
+              for run in (runs_payload or {}).get("workflow_runs", []):
+                  if not isinstance(run, dict):
+                      continue
+                  key = str(run.get("path") or run.get("workflow_id") or run.get("name"))
+                  if key in latest:
+                      continue
+                  item = {
+                      "repository": full_name,
+                      "workflow": run.get("name"),
+                      "path": run.get("path"),
+                      "run_id": run.get("id"),
+                      "event": run.get("event"),
+                      "status": run.get("status"),
+                      "conclusion": run.get("conclusion"),
+                      "head_sha": run.get("head_sha"),
+                      "created_at": run.get("created_at"),
+                      "updated_at": run.get("updated_at"),
+                      "html_url": run.get("html_url"),
+                  }
+                  latest[key] = item
+                  status = str(item["status"] or "")
+                  conclusion = str(item["conclusion"] or "")
+                  updated = iso(item["updated_at"])
+                  age_minutes = (
+                      round((NOW - updated).total_seconds() / 60, 1)
+                      if updated is not None else None
+                  )
+                  item["age_minutes"] = age_minutes
+                  if status in ACTIVE and age_minutes is not None and age_minutes > 45:
+                      stalled_active.append(item)
+                  elif status == "completed" and conclusion in RED:
+                      latest_red.append(item)
+                  elif status == "completed" and conclusion in TRANSIENT:
+                      transient_latest.append(item)
+              row["latest_workflows"] = sorted(latest.values(), key=lambda item: str(item.get("path") or ""))
+
+              branches, branch_error = safe_github(
+                  f"/repos/{full_name}/branches?per_page=100"
+              )
+              if branch_error:
+                  row["errors"].append(f"branches:{branch_error}")
+                  branches = []
+              candidates = [
+                  str(item.get("name"))
+                  for item in (branches or [])
+                  if isinstance(item, dict)
+                  and str(item.get("name") or "") != default
+                  and CANDIDATE.search(str(item.get("name") or ""))
+              ][:24]
+              for branch in candidates:
+                  compare, compare_error = safe_github(
+                      f"/repos/{full_name}/compare/"
+                      f"{urllib.parse.quote(default, safe='')}...{urllib.parse.quote(branch, safe='')}"
+                  )
+                  candidate_row = {
+                      "repository": full_name,
+                      "branch": branch,
+                      "open_pr": branch in open_heads,
+                      "status": (compare or {}).get("status") if isinstance(compare, dict) else None,
+                      "ahead_by": (compare or {}).get("ahead_by") if isinstance(compare, dict) else None,
+                      "behind_by": (compare or {}).get("behind_by") if isinstance(compare, dict) else None,
+                      "total_commits": (compare or {}).get("total_commits") if isinstance(compare, dict) else None,
+                      "error": compare_error,
+                  }
+                  row["candidate_branches"].append(candidate_row)
+                  if (
+                      not candidate_row["open_pr"]
+                      and isinstance(candidate_row["ahead_by"], int)
+                      and candidate_row["ahead_by"] > 0
+                  ):
+                      orphan_branches.append(candidate_row)
+              repo_reports.append(row)
+
+          def hf_list(kind: str) -> tuple[list[dict[str, Any]], str | None]:
+              try:
+                  payload = request_json(
+                      f"https://huggingface.co/api/{kind}?author={HF_ORG}&limit=100&full=true",
+                      timeout=45,
+                  )
+                  if not isinstance(payload, list):
+                      return [], "NON_LIST"
+                  return [row for row in payload if isinstance(row, dict)], None
+              except urllib.error.HTTPError as exc:
+                  return [], f"HTTP_{exc.code}"
+              except Exception as exc:
+                  return [], type(exc).__name__
+
+          models, models_error = hf_list("models")
+          datasets, datasets_error = hf_list("datasets")
+          spaces, spaces_error = hf_list("spaces")
+
+          def probe_space(space: dict[str, Any]) -> dict[str, Any]:
+              repo_id = str(space.get("id") or space.get("name") or "")
+              slug = repo_id.split("/", 1)[-1]
+              origin = f"https://{HF_ORG.lower()}-{slug.lower()}.hf.space"
+              detail = None
+              detail_error = None
+              try:
+                  detail = request_json(
+                      f"https://huggingface.co/api/spaces/{urllib.parse.quote(repo_id, safe='/')}",
+                      timeout=30,
+                  )
+              except urllib.error.HTTPError as exc:
+                  detail_error = f"HTTP_{exc.code}"
+              except Exception as exc:
+                  detail_error = type(exc).__name__
+              status = None
+              final_url = None
+              body_bytes = 0
+              probe_error = None
+              try:
+                  request = urllib.request.Request(
+                      origin + "/?estate_audit=" + str(time.time_ns()),
+                      headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"},
+                  )
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      status = response.status
+                      final_url = response.geturl().split("?", 1)[0]
+                      body_bytes = len(response.read(262145))
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+                  final_url = exc.geturl().split("?", 1)[0]
+                  body_bytes = len(exc.read(262145))
+                  probe_error = "HTTPError"
+              except Exception as exc:
+                  probe_error = type(exc).__name__
+              runtime = (detail or {}).get("runtime") if isinstance(detail, dict) else None
+              card = (detail or {}).get("cardData") if isinstance(detail, dict) else None
+              return {
+                  "id": repo_id,
+                  "private": space.get("private"),
+                  "disabled": space.get("disabled"),
+                  "sdk": (detail or {}).get("sdk") if isinstance(detail, dict) else space.get("sdk"),
+                  "sha": (detail or {}).get("sha") if isinstance(detail, dict) else space.get("sha"),
+                  "last_modified": (detail or {}).get("lastModified") if isinstance(detail, dict) else space.get("lastModified"),
+                  "runtime_stage": (runtime or {}).get("stage") if isinstance(runtime, dict) else None,
+                  "hardware": (runtime or {}).get("hardware") if isinstance(runtime, dict) else None,
+                  "requested_hardware": (runtime or {}).get("requestedHardware") if isinstance(runtime, dict) else None,
+                  "card_present": isinstance(card, dict) and bool(card),
+                  "origin": origin,
+                  "http_status": status,
+                  "final_url": final_url,
+                  "body_bytes": body_bytes,
+                  "detail_error": detail_error,
+                  "probe_error": probe_error,
+              }
+
+          space_reports: list[dict[str, Any]] = []
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              futures = [pool.submit(probe_space, row) for row in spaces]
+              for future in concurrent.futures.as_completed(futures):
+                  space_reports.append(future.result())
+          space_reports.sort(key=lambda row: row["id"])
+
+          hf_findings = {
+              "spaces_non_200": [row for row in space_reports if row.get("http_status") != 200],
+              "spaces_disabled": [row for row in space_reports if row.get("disabled") is True],
+              "spaces_non_running": [
+                  row for row in space_reports
+                  if row.get("runtime_stage") not in {None, "RUNNING"}
+              ],
+              "spaces_without_card": [row["id"] for row in space_reports if not row.get("card_present")],
+              "models_without_license": [
+                  str(row.get("id")) for row in models
+                  if not ((row.get("cardData") or {}).get("license"))
+              ],
+              "datasets_without_license": [
+                  str(row.get("id")) for row in datasets
+                  if not ((row.get("cardData") or {}).get("license"))
+              ],
+          }
+
+          report: dict[str, Any] = {
+              "schema": "szl.stalled-build-estate-audit/v1",
+              "generated_at": NOW.isoformat().replace("+00:00", "Z"),
+              "github": {
+                  "organization": ORG,
+                  "repository_count": len(repo_reports),
+                  "open_prs": open_prs,
+                  "latest_red_workflows": latest_red,
+                  "stalled_active_workflows": stalled_active,
+                  "transient_latest_workflows": transient_latest,
+                  "orphan_candidate_branches": orphan_branches,
+                  "repositories": repo_reports,
+              },
+              "hugging_face": {
+                  "organization": HF_ORG,
+                  "counts": {
+                      "models": len(models),
+                      "datasets": len(datasets),
+                      "spaces": len(spaces),
+                  },
+                  "errors": {
+                      "models": models_error,
+                      "datasets": datasets_error,
+                      "spaces": spaces_error,
+                  },
+                  "spaces": space_reports,
+                  "findings": hf_findings,
+              },
+              "read_only": True,
+              "repository_mutation_performed": False,
+              "provider_mutation_performed": False,
+              "secret_values_recorded": False,
+              "private_addresses_recorded": False,
+          }
+          canonical = json.dumps(report, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          report["sha256"] = hashlib.sha256(canonical).hexdigest()
+          Path("reports/stalled-build-estate-audit.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "# SZL stalled-build estate audit",
+              "",
+              f"Generated: `{report['generated_at']}`",
+              "",
+              f"- GitHub repositories visible: **{len(repo_reports)}**",
+              f"- Open pull requests: **{len(open_prs)}**",
+              f"- Latest red workflows: **{len(latest_red)}**",
+              f"- Stalled active workflows (>45 min): **{len(stalled_active)}**",
+              f"- Orphan Codex/Perplexity/repair branches ahead of main: **{len(orphan_branches)}**",
+              f"- HF models/datasets/Spaces: **{len(models)} / {len(datasets)} / {len(spaces)}**",
+              f"- HF Spaces not returning 200: **{len(hf_findings['spaces_non_200'])}**",
+              "",
+              "## Open pull requests",
+          ]
+          for item in open_prs[:50]:
+              lines.append(
+                  f"- `{item['repository']}#{item['number']}` — {item['title']} "
+                  f"(draft={item['draft']}, head=`{item['head_sha']}`)"
+              )
+          lines.extend(["", "## Latest red workflows"])
+          for item in latest_red[:80]:
+              lines.append(
+                  f"- `{item['repository']}` — {item['workflow']} — "
+                  f"`{item['conclusion']}` — run `{item['run_id']}`"
+              )
+          lines.extend(["", "## Stalled active workflows"])
+          for item in stalled_active[:80]:
+              lines.append(
+                  f"- `{item['repository']}` — {item['workflow']} — "
+                  f"`{item['status']}` for {item['age_minutes']} min — run `{item['run_id']}`"
+              )
+          lines.extend(["", "## Orphan candidate branches"])
+          for item in orphan_branches[:120]:
+              lines.append(
+                  f"- `{item['repository']}:{item['branch']}` — ahead `{item['ahead_by']}`, "
+                  f"behind `{item['behind_by']}`"
+              )
+          lines.extend(["", "## Hugging Face Space exceptions"])
+          for item in hf_findings["spaces_non_200"]:
+              lines.append(
+                  f"- `{item['id']}` — HTTP `{item['http_status']}` — "
+                  f"runtime `{item['runtime_stage']}` — sdk `{item['sdk']}`"
+              )
+          lines.extend(["", f"Receipt SHA-256: `{report['sha256']}`", ""])
+          markdown = "\n".join(lines)
+          Path("reports/stalled-build-estate-audit.md").write_text(markdown, encoding="utf-8")
+          print(markdown)
+          PY
+
+      - name: Upload read-only audit evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stalled-build-estate-audit-${{ github.run_id }}
+          path: reports/stalled-build-estate-audit.*
+          if-no-files-found: error
+          retention-days: 30
