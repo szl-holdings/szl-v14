@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-cloudflare-device-auth-live-now
-  cancel-in-progress: true
+  group: private-cloudflare-device-auth-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   authorize-and-converge:
@@ -52,6 +52,7 @@ jobs:
           python-version: "3.12"
 
       - name: Authorize this private recovery runner in Cloudflare
+        id: cloudflare_login
         shell: bash
         run: |
           set -euo pipefail
@@ -161,9 +162,3 @@ jobs:
             cloudflare-public-proof.json
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Revoke the temporary Wrangler OAuth session
-        if: always()
-        shell: bash
-        run: |
-          npx --yes wrangler@4.119.0 logout || true
