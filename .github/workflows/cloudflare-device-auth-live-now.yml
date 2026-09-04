@@ -1,0 +1,179 @@
+name: Private Cloudflare device authorization and A11oy edge convergence
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-device-auth-live-now-20260904
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-cloudflare-device-auth-live-now
+  cancel-in-progress: true
+
+jobs:
+  authorize-and-converge:
+    name: Authorize Cloudflare and converge the production edge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out the current protected A11oy source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: szl-holdings/a11oy
+          ref: main
+          path: a11oy
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record exact protected-main authority
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          local_sha="$(git -C a11oy rev-parse HEAD)"
+          remote_sha="$(git ls-remote https://github.com/szl-holdings/a11oy.git refs/heads/main | awk '{print $1}')"
+          test -n "$local_sha"
+          test "$local_sha" = "$remote_sha"
+          echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
+          printf 'A11oy protected-main source: %s\n' "$local_sha"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Authorize this private recovery runner in Cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Cloudflare authorization is required now. Open the private device URL and approve the account that owns a-11-oy.com and a11oy.net.'
+          npx --yes wrangler@4.119.0 login --device --browser=false --no-use-keyring
+
+      - name: Acquire the short-lived OAuth bearer without printing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth_json="$(npx --yes wrangler@4.119.0 auth token --json)"
+          cf_token="$(python -c 'import json,sys; value=json.load(sys.stdin); print(value.get("token", ""))' <<<"$auth_json")"
+          test -n "$cf_token"
+          echo "::add-mask::$cf_token"
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$cf_token" >> "$GITHUB_ENV"
+
+      - name: Refresh and re-pin latest protected A11oy source before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C a11oy fetch --no-tags --depth=1 origin main
+          git -C a11oy checkout --detach --force FETCH_HEAD
+          current="$(git -C a11oy rev-parse HEAD)"
+          remote="$(git ls-remote https://github.com/szl-holdings/a11oy.git refs/heads/main | awk '{print $1}')"
+          test "$current" = "$remote"
+          printf 'Converging Cloudflare from protected-main source: %s\n' "$current"
+
+      - name: Deploy the bounded Worker routes, proxy exact web DNS, and prove public state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python a11oy/scripts/repair_cloudflare_product_edge.py \
+            --report cloudflare-a11oy-edge-live-report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("cloudflare-a11oy-edge-live-report.json").read_text())
+          if report.get("status") != "LIVE":
+              raise SystemExit(f"Cloudflare convergence did not close: {report.get('status')}")
+          print(json.dumps({
+              "status": report.get("status"),
+              "zone": report.get("zone"),
+              "schema": report.get("schema"),
+              "credential_value_recorded": False,
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Independently probe the product and proof domains
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          probes = [
+              ("product_root", "https://a-11-oy.com/"),
+              ("product_build", "https://a-11-oy.com/api/build-info"),
+              ("product_brain", "https://a-11-oy.com/brain"),
+              ("product_anatomy", "https://a-11-oy.com/living-anatomy"),
+              ("product_killinchu", "https://a-11-oy.com/killinchu"),
+              ("proof_root", "https://a11oy.net/"),
+          ]
+          rows = []
+          failures = []
+          for name, base in probes:
+              url = base + ("&" if "?" in base else "?") + f"proof={time.time_ns()}"
+              req = urllib.request.Request(url, headers={
+                  "Cache-Control": "no-cache",
+                  "Pragma": "no-cache",
+                  "User-Agent": "SZL-Private-Cloudflare-Convergence/1.0",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      body = response.read()
+                      row = {
+                          "name": name,
+                          "status": response.status,
+                          "final_url": response.geturl().split("?", 1)[0],
+                          "bytes": len(body),
+                      }
+              except urllib.error.HTTPError as exc:
+                  body = exc.read()
+                  row = {
+                      "name": name,
+                      "status": exc.code,
+                      "final_url": exc.geturl().split("?", 1)[0],
+                      "bytes": len(body),
+                  }
+              except Exception as exc:
+                  row = {"name": name, "status": None, "error": f"{type(exc).__name__}: {exc}"}
+              rows.append(row)
+              if row.get("status") != 200:
+                  failures.append(f"{name}: {row.get('status')}")
+          report = {
+              "schema": "szl.private-cloudflare-public-proof/v1",
+              "probes": rows,
+              "complete": not failures,
+              "failures": failures,
+              "credential_values_recorded": False,
+          }
+          Path("cloudflare-public-proof.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(report, indent=2, sort_keys=True))
+          if failures:
+              raise SystemExit(1)
+          PY
+
+      - name: Upload secret-free Cloudflare receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: private-cloudflare-a11oy-live-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            cloudflare-a11oy-edge-live-report.json
+            cloudflare-public-proof.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Revoke the temporary Wrangler OAuth session
+        if: always()
+        shell: bash
+        run: |
+          npx --yes wrangler@4.119.0 logout || true
