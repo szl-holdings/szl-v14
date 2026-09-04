@@ -18,27 +18,28 @@ jobs:
     name: Authorize Cloudflare and converge the production edge
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      A11OY_CONTROLLER_SHA: d0362e08e8eeb1ff18ae99b7165235183014b041
     steps:
-      - name: Check out the current protected A11oy source
+      - name: Check out the exact protected A11oy controller source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: szl-holdings/a11oy
-          ref: main
+          ref: ${{ env.A11OY_CONTROLLER_SHA }}
           path: a11oy
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Record exact protected-main authority
-        id: source
+      - name: Prove exact controller source
         shell: bash
         run: |
           set -euo pipefail
           local_sha="$(git -C a11oy rev-parse HEAD)"
-          remote_sha="$(git ls-remote https://github.com/szl-holdings/a11oy.git refs/heads/main | awk '{print $1}')"
-          test -n "$local_sha"
-          test "$local_sha" = "$remote_sha"
-          echo "sha=$local_sha" >> "$GITHUB_OUTPUT"
-          printf 'A11oy protected-main source: %s\n' "$local_sha"
+          test "$local_sha" = "$A11OY_CONTROLLER_SHA"
+          git ls-remote https://github.com/szl-holdings/a11oy.git | grep -Fq "$A11OY_CONTROLLER_SHA"
+          test -f a11oy/scripts/repair_cloudflare_product_edge.py
+          test -f a11oy/cloudflare/a11oy-product-root-worker.mjs
+          printf 'A11oy protected controller source: %s\n' "$local_sha"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4.4.0
@@ -54,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo 'Cloudflare authorization is required now. Open the private device URL and approve the account that owns a-11-oy.com and a11oy.net.'
+          echo 'Cloudflare authorization required: approve the account that owns a-11-oy.com and a11oy.net.'
           npx --yes wrangler@4.119.0 login --device --browser=false --no-use-keyring
 
       - name: Acquire the short-lived OAuth bearer without printing it
@@ -67,18 +68,7 @@ jobs:
           echo "::add-mask::$cf_token"
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$cf_token" >> "$GITHUB_ENV"
 
-      - name: Refresh and re-pin latest protected A11oy source before mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          git -C a11oy fetch --no-tags --depth=1 origin main
-          git -C a11oy checkout --detach --force FETCH_HEAD
-          current="$(git -C a11oy rev-parse HEAD)"
-          remote="$(git ls-remote https://github.com/szl-holdings/a11oy.git refs/heads/main | awk '{print $1}')"
-          test "$current" = "$remote"
-          printf 'Converging Cloudflare from protected-main source: %s\n' "$current"
-
-      - name: Deploy the bounded Worker routes, proxy exact web DNS, and prove public state
+      - name: Deploy bounded Worker routes and exact web DNS state
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +88,7 @@ jobs:
           }, indent=2, sort_keys=True))
           PY
 
-      - name: Independently probe the product and proof domains
+      - name: Independently probe product, Brain, Anatomy, Killinchu, and proof domains
         shell: bash
         run: |
           set -euo pipefail
