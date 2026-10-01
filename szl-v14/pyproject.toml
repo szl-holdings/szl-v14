@@ -17,6 +17,7 @@ dependencies = [
     "jsonschema>=4.21",
     "rfc8785>=0.1.2",
 ]
+classifiers = ["Private :: Do Not Upload"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
