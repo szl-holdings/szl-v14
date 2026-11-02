@@ -10,7 +10,6 @@ from szl_v14.lib.states import Finding, Report, State
 
 def run(targets: Path | None, probe_file: Path | None) -> Report:
     findings: list[Finding] = []
-    doc = _load_targets(targets) if (targets or True) else {}
     rows = []
     try:
         doc = _load_targets(targets)

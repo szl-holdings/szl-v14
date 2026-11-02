@@ -1105,7 +1105,6 @@ from szl_v14.lib.states import Finding, Report, State
 
 def run(targets: Path | None, probe_file: Path | None) -> Report:
     findings: list[Finding] = []
-    doc = _load_targets(targets) if (targets or True) else {}
     rows = []
     try:
         doc = _load_targets(targets)
@@ -1630,14 +1629,51 @@ def _measure(claim: dict, snapshot_dir: Path):
     if kind == "github_repo_count":
         return len(snap.github_repos) if snap.github_repos else None
     if kind == "github_visibility_count":
-        vis = claim["measure"]["visibility"]
-        return sum(1 for r in snap.github_repos if r.get("visibility") == vis) if snap.github_repos else None
+        vis = claim["measure"]["visibility"].upper()
+        return sum(1 for r in snap.github_repos
+                   if isinstance(r.get("visibility"), str)
+                   and r["visibility"].upper() == vis) if snap.github_repos else None
     if kind == "hf_repo_count":
         rtype = claim["measure"]["repo_type"]
         return snap.hf_estate.get("counts", {}).get(rtype)
     if kind == "github_repo_present":
+        if "github/repos_cli.json" in snap.unknown:
+            return None
         return claim["measure"]["repo"] in {r.get("name") for r in snap.github_repos}
     return None
+
+
+def _invalid_claims(reason: str) -> Report:
+    return Report(cmd="verify-claims", state=State.FAIL,
+                  findings=[Finding("HIGH", "INVALID_CLAIMS", reason)])
+
+
+def _valid_claim(claim: object) -> bool:
+    if not isinstance(claim, dict):
+        return False
+    if any(not isinstance(claim.get(key), str) or not claim[key].strip()
+           for key in ("id", "claim")) or "expected" not in claim:
+        return False
+    measure = claim.get("measure")
+    if not isinstance(measure, dict):
+        return False
+    kind = measure.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        return False
+    if kind in {"github_repo_count", "github_visibility_count", "hf_repo_count"}:
+        if type(claim["expected"]) is not int or claim["expected"] < 0:
+            return False
+    if kind == "github_visibility_count":
+        visibility = measure.get("visibility")
+        return isinstance(visibility, str) and visibility.upper() in {"PUBLIC", "PRIVATE", "INTERNAL"}
+    if kind == "hf_repo_count":
+        repo_type = measure.get("repo_type")
+        return isinstance(repo_type, str) and repo_type in {"model", "dataset", "space"}
+    if kind == "github_repo_present":
+        repo = measure.get("repo")
+        return type(claim["expected"]) is bool and isinstance(repo, str) and bool(repo.strip())
+    # A future nonempty measurement kind remains UNMEASURABLE, never PASS.
+    return True
 
 
 def run(snapshot_dir: Path, claims_path: Path | None = None) -> Report:
@@ -1648,7 +1684,25 @@ def run(snapshot_dir: Path, claims_path: Path | None = None) -> Report:
         return Report(cmd="verify-claims", state=State.UNKNOWN,
                       findings=[Finding("MEDIUM", "NO_CLAIMS", f"claims file missing: {claims_path}")])
 
-    claims = yaml.safe_load(claims_path.read_text()) or []
+    try:
+        claims = yaml.safe_load(claims_path.read_text())
+    except OSError:
+        return Report(cmd="verify-claims", state=State.UNKNOWN,
+                      findings=[Finding("MEDIUM", "CLAIMS_UNAVAILABLE", "claims file could not be read")])
+    except (yaml.YAMLError, UnicodeError, ValueError, RecursionError):
+        return _invalid_claims("claims file could not be parsed")
+    if claims is None or (isinstance(claims, list) and not claims):
+        return Report(cmd="verify-claims", state=State.UNKNOWN,
+                      findings=[Finding("MEDIUM", "NO_CLAIMS", "claims file contains no claims")])
+    if not isinstance(claims, list):
+        return _invalid_claims("claims document must be a nonempty list")
+    seen = set()
+    for index, claim in enumerate(claims, start=1):
+        if not _valid_claim(claim):
+            return _invalid_claims(f"claim {index} has an invalid schema")
+        if claim["id"] in seen:
+            return _invalid_claims(f"claim {index} repeats a claim id")
+        seen.add(claim["id"])
     for c in claims:
         measured = _measure(c, snapshot_dir)
         if measured is None:
@@ -1993,4 +2047,159 @@ def test_worst_state_critical_is_fail():
 
 def test_worst_state_info_is_pass():
     assert worst_state([Finding("INFO", "X", "y")]) == State.PASS
+```
+
+
+## `szl-v14/tests/test_deploy_config.py`
+
+<!-- extract: szl-v14/tests/test_deploy_config.py -->
+```python
+"""Read-only deployment inspection reports missing inputs without a crash."""
+from szl_v14.lib.states import State
+from szl_v14.modules import deploy, dns
+
+
+def test_missing_explicit_targets_is_unknown(tmp_path):
+    report = deploy.run(tmp_path / "absent.yaml", None)
+    assert report.state == State.UNKNOWN
+    assert report.findings[0].code == "MISSING_CONFIG"
+
+
+def test_missing_default_targets_is_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(dns, "_TARGETS", tmp_path / "absent-default.yaml")
+    report = deploy.run(None, None)
+    assert report.state == State.UNKNOWN
+    assert report.findings[0].code == "MISSING_CONFIG"
+
+
+def test_valid_targets_are_loaded_once(monkeypatch):
+    calls = []
+    def load(path):
+        calls.append(path)
+        return {"zones": [{"zone": "example.test", "role": "demo", "target_summary": "offline"}]}
+    monkeypatch.setattr(deploy, "_load_targets", load)
+    report = deploy.run(None, None)
+    assert calls == [None]
+    assert report.state == State.PASS
+    assert report.summary["deployments"] == [{"zone": "example.test", "role": "demo", "target": "offline", "notes": ""}]
+```
+
+
+## `szl-v14/tests/test_verify_claims_admission.py`
+
+<!-- extract: szl-v14/tests/test_verify_claims_admission.py -->
+```python
+"""A claim report requires actual, well-formed claims before measuring."""
+import json
+from pathlib import Path
+
+import pytest
+import yaml
+
+from szl_v14.lib.states import State, emit_json
+from szl_v14.modules import verify_claims
+
+
+def claim(**changes):
+    return {"id": "repo-count", "claim": "Repository count", "expected": 1,
+            "measure": {"kind": "github_repo_count"}, **changes}
+
+
+def run(tmp_path, text):
+    path = tmp_path / "claims.yaml"
+    path.write_text(text)
+    root = tmp_path / "snapshots"
+    (root / "github").mkdir(parents=True, exist_ok=True)
+    (root / "github/repos_cli.json").write_text(json.dumps([{"name": "known", "visibility": "PUBLIC"}]))
+    return verify_claims.run(root, path)
+
+
+@pytest.mark.parametrize("text", ["", "# no claims\n", "null", "[]"])
+def test_empty_document_is_unknown_without_measurement(tmp_path, monkeypatch, text):
+    monkeypatch.setattr(verify_claims, "_measure", lambda *args: pytest.fail("empty claims measured"))
+    report = run(tmp_path, text)
+    assert report.state == State.UNKNOWN
+    assert report.findings[0].code == "NO_CLAIMS"
+
+
+@pytest.mark.parametrize("document", [False, 0, "claims", {}, {"id": "mapping"},
+    [None], [1], ["claim"], [False], [{}], [claim(id="")], [claim(id=[])],
+    [claim(claim="")], [claim(claim=0)], [claim(measure=None)],
+    [claim(measure=[])], [claim(measure={})], [claim(measure={"kind": 1})],
+    [claim(expected=True)], [claim(expected="1")], [claim(expected=-1)],
+    [claim(expected=float("nan"))], [claim(expected=float("inf"))],
+    [claim(measure={"kind": "github_visibility_count"})],
+    [claim(measure={"kind": "github_visibility_count", "visibility": []})],
+    [claim(measure={"kind": "hf_repo_count", "repo_type": {}})],
+    [claim(measure={"kind": "github_repo_present", "repo": "known"}, expected=1)],
+    [claim(measure={"kind": "github_repo_present", "repo": []}, expected=True)],
+    [claim(), claim()],
+])
+def test_malformed_claim_set_fails_before_any_measurement(tmp_path, monkeypatch, document):
+    monkeypatch.setattr(verify_claims, "_measure", lambda *args: pytest.fail("invalid claim set measured"))
+    report = run(tmp_path, yaml.safe_dump(document))
+    assert report.state == State.FAIL
+    assert report.findings[0].code == "INVALID_CLAIMS"
+    json.loads(emit_json(report))
+
+
+def test_missing_expected_and_invalid_later_claim_cannot_partially_pass(tmp_path, monkeypatch):
+    incomplete = claim(id="second")
+    del incomplete["expected"]
+    monkeypatch.setattr(verify_claims, "_measure", lambda *args: pytest.fail("partially admitted claims"))
+    assert run(tmp_path, yaml.safe_dump([claim(), incomplete])).state == State.FAIL
+
+
+@pytest.mark.parametrize("text", ["[unterminated", "- id: one\n  measure: [unclosed"])
+def test_yaml_syntax_error_is_a_report_not_a_traceback(tmp_path, text):
+    report = run(tmp_path, text)
+    assert report.state == State.FAIL
+    assert report.findings[0].code == "INVALID_CLAIMS"
+
+
+def test_missing_file_preserves_unknown(tmp_path):
+    report = verify_claims.run(tmp_path, tmp_path / "absent.yaml")
+    assert report.state == State.UNKNOWN
+    assert report.findings[0].code == "NO_CLAIMS"
+
+
+def test_unreadable_file_is_unknown(tmp_path):
+    report = verify_claims.run(tmp_path, tmp_path)
+    assert report.state == State.UNKNOWN
+    assert report.findings[0].code == "CLAIMS_UNAVAILABLE"
+
+
+def test_valid_pass_drift_and_future_measure_kind_preserve_states(tmp_path):
+    good = run(tmp_path, yaml.safe_dump([claim()]))
+    assert good.state == State.PASS and good.summary["pass"] == 1
+    drift = run(tmp_path, yaml.safe_dump([claim(expected=2)]))
+    assert drift.state == State.FAIL and drift.summary["claim_drift"] == 1
+    future = run(tmp_path, yaml.safe_dump([claim(measure={"kind": "future_metric"})]))
+    assert future.state == State.WARN and future.summary["unmeasurable"] == 1
+
+
+def test_missing_snapshot_cannot_prove_repository_absence(tmp_path):
+    path = tmp_path / "claims.yaml"
+    path.write_text(yaml.safe_dump([claim(expected=False, measure={"kind": "github_repo_present", "repo": "absent"})]))
+    report = verify_claims.run(tmp_path / "missing", path)
+    assert report.state == State.WARN
+    assert report.summary["unmeasurable"] == 1
+
+
+def test_present_empty_snapshot_can_prove_repository_absence(tmp_path):
+    path = tmp_path / "claims.yaml"
+    path.write_text(yaml.safe_dump([claim(expected=False, measure={"kind": "github_repo_present", "repo": "absent"})]))
+    (tmp_path / "github").mkdir()
+    (tmp_path / "github/repos_cli.json").write_text("[]")
+    report = verify_claims.run(tmp_path, path)
+    assert report.state == State.PASS and report.summary["pass"] == 1
+
+
+@pytest.mark.parametrize("visibility", ["public", "PuBlIc"])
+@pytest.mark.parametrize("expected,state", [(1, State.PASS), (0, State.FAIL)])
+def test_visibility_admission_and_measurement_use_the_same_case(tmp_path, visibility, expected, state):
+    report = run(tmp_path, yaml.safe_dump([claim(
+        measure={"kind": "github_visibility_count", "visibility": visibility}, expected=expected)]))
+    assert report.state == state
+    assert report.summary["results"][0]["measured"] == 1
 ```
