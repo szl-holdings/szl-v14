@@ -194,6 +194,17 @@ def write_json(path: Path, obj) -> None:
     path.write_bytes(jcs(obj).encode("utf-8"))
 
 
+def builder_publication_eligible(man: dict) -> bool:
+    """Return the builder's fixed authorization value after strict admission."""
+    gates = man.get("gates", {})
+    if type(gates) is not dict:
+        fail("gates must be a TOML table")
+    value = gates.get("publication_eligible", False)
+    if value is not False:
+        fail("publication_eligible must be the literal boolean false at the builder layer")
+    return False
+
+
 def build_payload(man: dict) -> bytes:
     name = man["payload"]["name"]
     lines = [f"# {name}", ""]
@@ -225,7 +236,7 @@ def cmd_export(man: dict) -> None:
     manifest = {
         "payload": man["payload"]["name"],
         "version": man["payload"]["version"],
-        "publication_eligible": bool(man.get("gates", {}).get("publication_eligible", False)),
+        "publication_eligible": builder_publication_eligible(man),
         "sections": [{"id": s["id"], "path": s["path"],
                       "sha256": hashlib.sha256((ROOT / s["path"]).read_bytes()).hexdigest()}
                      for s in sections(man)],
@@ -326,3 +337,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

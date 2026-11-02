@@ -36,6 +36,8 @@ ships. The builder enforces in code what the doctrine says in prose.
 
 ## CI
 
-`.github/workflows/build.yml` runs: build → verify → byte-identical-rebuild
-proof → install the extracted control plane → run its test suite. The
-payload and the software it ships are gated by the same pipeline.
+The repository-root `.github/workflows/payload-builder.yml` runs the strict
+builder authorization regression, build → verify → byte-identical-rebuild
+proof, then installs the extracted control plane and runs its test suite. The
+payload and the software it ships are gated by the same active pipeline.
+
