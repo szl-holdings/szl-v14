@@ -20,3 +20,9 @@
 - `OPERATOR_PACKET.md` — the one file to read first.
 
 Sections are the source. dist/ is derived. Never hand-edit dist/.
+
+Estate on Hugging Face: models, datasets and Spaces are published under the [SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) org.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
