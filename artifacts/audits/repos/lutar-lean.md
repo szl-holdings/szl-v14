@@ -16,6 +16,6 @@
 | forbidden_refs | 0 |
 | state | PASS |
 
-description: Lean 4 + Mathlib formalization of the Λ aggregator — Λ uniqueness as Conjecture 1 (not a closed theorem). 749 declarations · 14 axioms · 163 tracked sorries. Backs the SZL governance gate. Doctrine v11 LOCKED · DOI 10.5281/zenodo.20434308
+description: Lean 4 + Mathlib formalization of the Λ aggregator — Λ uniqueness as Conjecture 1 (not a closed theorem). 749 declarations · 14 axioms · 163 tracked sorries. Backs the SZL governance gate. Doctrine v11 LOCKED · DOI 10.5281/zenodo.24239654
 
 Unprobed fields are UNKNOWN by construction — never guessed, never carried forward.

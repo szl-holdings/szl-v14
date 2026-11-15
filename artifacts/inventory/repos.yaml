@@ -77,7 +77,7 @@ github:
     license: null
     description: Lean 4 + Mathlib formalization of the Λ aggregator — Λ uniqueness
       as Conjecture 1 (not a closed theorem). 749 declarations · 14 axioms · 163 tracked
-      sorries. Backs the SZL governance gate. Doctrine v11 LOCKED · DOI 10.5281/zenodo.20434308
+      sorries. Backs the SZL governance gate. Doctrine v11 LOCKED · DOI 10.5281/zenodo.24239654
     url: https://github.com/szl-holdings/lutar-lean
   - name: szl-frontier
     visibility: PUBLIC
