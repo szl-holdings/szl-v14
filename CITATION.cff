@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please credit SZL Holdings."
+title: "szl-v14 - SZL V14: payload builder + estate control plane + live audit bundle (read-only control plane; authorization packets for mutations) (SZL Holdings governed-AI estate)"
+authors:
+  - name: SZL Holdings
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/szl-holdings/szl-v14"
+keywords:
+  - governed-ai
+  - provenance
+  - szl-holdings
